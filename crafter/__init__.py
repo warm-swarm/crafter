@@ -1,3 +1,5 @@
+print('=+= Texture Rich Crafter =+=')
+
 from .env import Env
 from .recorder import Recorder
 
