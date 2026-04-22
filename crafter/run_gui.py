@@ -11,6 +11,20 @@ from PIL import Image
 import crafter
 
 
+def _parse_texture_variant(value):
+  """Accept an int id, one of the pool names, or 'none' for legacy."""
+  if value is None or value.lower() == 'none':
+    return None
+  if value in ('train_pool', 'test_pool'):
+    return value
+  try:
+    return int(value)
+  except ValueError:
+    raise argparse.ArgumentTypeError(
+        f"--texture-variant must be an int, 'train_pool', 'test_pool', or "
+        f"'none'; got {value!r}")
+
+
 def main():
   boolean = lambda x: bool(['False', 'True'].index(x))
   parser = argparse.ArgumentParser()
@@ -26,6 +40,13 @@ def main():
   parser.add_argument('--wait', type=boolean, default=False)
   parser.add_argument('--death', type=str, default='reset', choices=[
       'continue', 'reset', 'quit'])
+  parser.add_argument(
+      '--texture-variant', type=_parse_texture_variant, default=None,
+      help="Texture variant: int in [0, 108), 'train_pool', 'test_pool', or "
+           "'none' for legacy behaviour (default).")
+  parser.add_argument(
+      '--texture-seed', type=int, default=None,
+      help='Seed for the pool-sampling RNG (only used with train_pool/test_pool).')
   args = parser.parse_args()
 
   keymap = {
@@ -60,13 +81,17 @@ def main():
   size[1] = size[1] or args.window[1]
 
   env = crafter.Env(
-      area=args.area, view=args.view, length=args.length, seed=args.seed)
+      area=args.area, view=args.view, length=args.length, seed=args.seed,
+      texture_variant=args.texture_variant, texture_seed=args.texture_seed)
   env = crafter.Recorder(env, args.record)
   env.reset()
   achievements = set()
   duration = 0
   return_ = 0
   was_done = False
+  if args.texture_variant is not None:
+    print(f'Texture variant: {args.texture_variant} '
+          f'(current id: {env._textures.variant_id})')
   print('Diamonds exist:', env._world.count('diamond'))
 
   pygame.init()

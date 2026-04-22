@@ -5,6 +5,7 @@ import numpy as np
 from . import constants
 from . import engine
 from . import objects
+from . import textures as textures_mod
 from . import worldgen
 
 
@@ -26,7 +27,8 @@ class Env(BaseClass):
 
   def __init__(
       self, area=(64, 64), view=(9, 9), size=(64, 64),
-      reward=True, length=10000, seed=None):
+      reward=True, length=10000, seed=None,
+      texture_variant=None, texture_seed=None):
     view = np.array(view if hasattr(view, '__len__') else (view, view))
     size = np.array(size if hasattr(size, '__len__') else (size, size))
     seed = np.random.randint(0, 2**31 - 1) if seed is None else seed
@@ -38,7 +40,11 @@ class Env(BaseClass):
     self._seed = seed
     self._episode = 0
     self._world = engine.World(area, constants.materials, (12, 12))
-    self._textures = engine.Textures(constants.root / 'assets')
+    self._texture_variant = texture_variant
+    # RNG for texture sampling; independent of the world RNG so fixing one
+    # and varying the other is possible.
+    self._texture_rng = np.random.RandomState(texture_seed)
+    self._textures = self._build_textures()
     item_rows = int(np.ceil(len(constants.items) / view[0]))
     self._local_view = engine.LocalView(
         self._world, self._textures, [view[0], view[1] - item_rows])
@@ -67,11 +73,36 @@ class Env(BaseClass):
   def action_names(self):
     return constants.actions
 
+  def _build_textures(self):
+    assets = constants.root / 'assets'
+    variant = self._texture_variant
+    if variant is None:
+      return engine.Textures(assets)
+    if isinstance(variant, str):
+      if variant not in ('train_pool', 'test_pool'):
+        raise ValueError(
+            f"texture_variant string must be 'train_pool' or 'test_pool', "
+            f"got {variant!r}.")
+      return textures_mod.TextureBank(assets, variant_id=0)
+    return textures_mod.TextureBank(assets, variant_id=int(variant))
+
+  def _sample_texture_variant(self):
+    variant = self._texture_variant
+    if variant == 'train_pool':
+      pool = sorted(textures_mod.TextureBank.TRAIN_POOL)
+    elif variant == 'test_pool':
+      pool = sorted(textures_mod.TextureBank.TEST_POOL)
+    else:
+      return
+    chosen = int(pool[self._texture_rng.randint(0, len(pool))])
+    self._textures.set_variant(chosen)
+
   def reset(self):
     center = (self._world.area[0] // 2, self._world.area[1] // 2)
     self._episode += 1
     self._step = 0
     self._world.reset(seed=hash((self._seed, self._episode)) % (2 ** 31 - 1))
+    self._sample_texture_variant()
     self._update_time()
     self._player = objects.Player(self._world, center)
     self._last_health = self._player.health
