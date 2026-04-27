@@ -73,6 +73,12 @@ class Env(BaseClass):
   def action_names(self):
     return constants.actions
 
+  @property
+  def current_variant_id(self):
+    if self._texture_variant is None:
+      return None
+    return self._textures.variant_id
+
   def _build_textures(self):
     assets = constants.root / 'assets'
     variant = self._texture_variant

@@ -2,10 +2,18 @@
 
 import pathlib
 import shutil
+import sys
 import tempfile
 
 import numpy as np
 import pytest
+
+# Make `dreamerv3.main` importable for the per-worker texture-seed test
+# (the dreamerv3/ package is a sibling of crafter/ under the repo root,
+# not on the default import path when pytest is invoked from crafter/).
+_REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
+if str(_REPO_ROOT) not in sys.path:
+  sys.path.insert(0, str(_REPO_ROOT))
 
 import crafter
 from crafter import constants
@@ -158,6 +166,26 @@ def test_pool_sampling():
       f'expected at least 90% coverage of TRAIN_POOL, got {coverage:.2%}')
 
 
+def test_current_variant_id_reflects_state():
+  """Env.current_variant_id: None in legacy, fixed for int, resamples for pool."""
+  legacy = crafter.Env(seed=WORLD_SEED, area=TINY_AREA)
+  assert legacy.current_variant_id is None
+  fixed = crafter.Env(seed=WORLD_SEED, area=TINY_AREA, texture_variant=42)
+  assert fixed.current_variant_id == 42
+  fixed.reset()
+  assert fixed.current_variant_id == 42
+  pool = crafter.Env(
+      seed=WORLD_SEED, area=TINY_AREA,
+      texture_variant='train_pool', texture_seed=TEXTURE_SEED)
+  seen = set()
+  for _ in range(20):
+    pool.reset()
+    v = pool.current_variant_id
+    assert v in set(TextureBank.TRAIN_POOL)
+    seen.add(v)
+  assert len(seen) > 1, 'expected multiple variants across 20 resets'
+
+
 def test_unknown_asset_fails_loudly():
   """Unexpected PNG in assets dir causes TextureBank construction to raise."""
   with tempfile.TemporaryDirectory() as tmp:
@@ -170,3 +198,58 @@ def test_unknown_asset_fails_loudly():
     with pytest.raises(ValueError) as exc_info:
       TextureBank(tmp, variant_id=0)
     assert 'surprise-sprite' in str(exc_info.value)
+
+
+def test_within_episode_variant_stability():
+  """current_variant_id must only change on reset(), never during step()."""
+  env = crafter.Env(
+      seed=WORLD_SEED, area=SMALL_AREA,
+      texture_variant='train_pool', texture_seed=TEXTURE_SEED)
+  env.reset()
+  v0 = env.current_variant_id
+  assert v0 in set(TextureBank.TRAIN_POOL)
+  rng = np.random.RandomState(0)
+  n_actions = env.action_space.n
+  for step in range(25):
+    env.step(int(rng.randint(0, n_actions)))
+    assert env.current_variant_id == v0, (
+        f'variant changed at step {step}: {v0} -> {env.current_variant_id}')
+
+
+def test_per_worker_texture_seed():
+  """make_env must give each worker a distinct texture_seed when set > 0,
+  so envs > 1 don't all walk the same train_pool variant sequence."""
+  import elements
+  from dreamerv3.main import make_env
+  # No use_seed key: the texture-seed offset must work independently of
+  # the dreamer world-seed pathway.
+  config = elements.Config(
+      task='crafter_reward',
+      seed=0,
+      logdir='/tmp/_test_make_env',
+      env={'crafter': {
+          'size': [64, 64],
+          'logs': False,
+          'texture_variant': 'train_pool',
+          'texture_seed': 100,
+      }},
+  )
+  env_a = make_env(config, 0)
+  env_b = make_env(config, 1)
+
+  def _raw(env):
+    while hasattr(env, 'env'):
+      env = env.env
+    return env._env  # underlying crafter.Env beneath the Crafter adapter
+
+  raw_a, raw_b = _raw(env_a), _raw(env_b)
+  seq_a, seq_b = [], []
+  for _ in range(50):
+    raw_a.reset()
+    raw_b.reset()
+    seq_a.append(raw_a.current_variant_id)
+    seq_b.append(raw_b.current_variant_id)
+  diffs = sum(int(a != b) for a, b in zip(seq_a, seq_b))
+  assert diffs >= 40, (
+      f'expected >=40/50 differing positions, got {diffs}; '
+      f'seq_a={seq_a[:5]}..., seq_b={seq_b[:5]}...')
