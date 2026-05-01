@@ -41,6 +41,9 @@ def main():
   p = argparse.ArgumentParser()
   p.add_argument('--baseline', required=True)
   p.add_argument('--treatment', required=False, default=None)
+  p.add_argument('--random', required=False, default=None,
+                 help='Optional sweep_results_r.jsonl from a uniform-random '
+                      'policy. Adds three condition=random rows.')
   p.add_argument('--metric', default='return', choices=['return', 'length'])
   p.add_argument('--output', required=True)
   args = p.parse_args()
@@ -49,6 +52,8 @@ def main():
   conditions = [('baseline', args.baseline)]
   if args.treatment:
     conditions.append(('treatment', args.treatment))
+  if args.random:
+    conditions.append(('random', args.random))
 
   loaded = {cond: sweep_common.load_sweep(path) for cond, path in conditions}
 

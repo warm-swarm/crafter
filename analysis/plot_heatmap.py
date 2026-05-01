@@ -29,7 +29,19 @@ def main():
 
   fig, ax = plt.subplots(figsize=(7, 3))
   # Transpose so y=sat, x=hue.
-  im = ax.imshow(grid.T, aspect='auto', origin='lower', cmap='viridis')
+  display = grid.T
+  im = ax.imshow(display, aspect='auto', origin='lower', cmap='viridis')
+  # Per-cell numeric overlay. Viridis luminance increases monotonically with
+  # value, so flip text white when the *normalised* value is below 0.5.
+  vmin = float(np.nanmin(display))
+  vmax = float(np.nanmax(display))
+  span = vmax - vmin if vmax > vmin else 1.0
+  for (yi, xi), val in np.ndenumerate(display):
+    if np.isnan(val):
+      continue
+    color = 'white' if (val - vmin) / span < 0.5 else 'black'
+    ax.text(xi, yi, f'{val:.1f}', ha='center', va='center',
+            color=color, fontsize=7)
   ax.set_xticks(range(len(hues)))
   ax.set_xticklabels([f'{h}' for h in hues])
   ax.set_yticks(range(len(sats)))

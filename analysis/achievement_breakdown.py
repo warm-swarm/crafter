@@ -25,16 +25,19 @@ def main():
     all_achievements.update(sweep_common.achievement_names(rows))
   achievements = sorted(all_achievements)
 
+  def pool_subset(rows, pool):
+    if pool == 'clean':
+      return [r for r in rows if r['variant_id'] == 0]
+    return [r for r in rows if sweep_common.pool_of(r['variant_id']) == pool]
+
   fields = ['achievement', 'condition', 'pool', 'n_episodes', 'success_rate']
   with open(args.output, 'w', newline='') as f:
     w = csv.DictWriter(f, fieldnames=fields)
     w.writeheader()
     for ach in achievements:
       for cond, rows in loaded.items():
-        for pool in ('train', 'test'):
-          pool_rows = [
-              r for r in rows
-              if sweep_common.pool_of(r['variant_id']) == pool]
+        for pool in ('clean', 'train', 'test'):
+          pool_rows = pool_subset(rows, pool)
           if not pool_rows:
             continue
           rate = sweep_common.achievement_success_rate(pool_rows, ach)
@@ -48,10 +51,8 @@ def main():
     # Crafter score: geometric mean of achievement success rates per cell.
     # Leading underscore makes these easy to filter from achievement rows.
     for cond, rows in loaded.items():
-      for pool in ('train', 'test'):
-        pool_rows = [
-            r for r in rows
-            if sweep_common.pool_of(r['variant_id']) == pool]
+      for pool in ('clean', 'train', 'test'):
+        pool_rows = pool_subset(rows, pool)
         if not pool_rows:
           continue
         w.writerow({
